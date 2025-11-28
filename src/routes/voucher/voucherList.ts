@@ -1,61 +1,59 @@
 // src/routes/voucher/voucherList.ts
 import { jsonResponse } from "../../_lib/utils";
+import { auth } from "../../_lib/auth";
+import { Voucher, computeVoucherStatus } from "../../_lib/voucherUtils";
 
-export async function voucherListHandler(req: Request, env: any) {
+export async function voucherListHandler(req: Request, env: any): Promise<Response> {
   try {
-    console.log("📥 voucherListHandler START");
-
-    const keys = await env.KV.list({ prefix: "voucher:" });
-    console.log("🔑 Voucher keys:", keys.keys.map((k) => k.name));
-
-    const base = env.WORKER_URL || "http://localhost:8787";
-
-    const fix = (val: any) => {
-      if (!val) return null;
-      if (typeof val !== "string") return val;
-
-      // Already a full URL
-      if (val.startsWith("http://") || val.startsWith("https://")) {
-        return val;
-      }
-
-      // Remove extra prefix and slashes
-      let cleaned = val
-        .replace(/^\/?r2\//, "")
-        .replace(/^\/+/, "");
-
-      const finalUrl = `${base}/r2/${cleaned}`;
-      console.log("🔗 FIXED IMAGE URL:", { original: val, finalUrl });
-      return finalUrl;
-    };
-
-    const vouchers: any[] = [];
-
-    for (const k of keys.keys) {
-      const raw = await env.KV.get(k.name);
-      console.log("📦 RAW KV VALUE:", { key: k.name, raw });
-
-      if (!raw) continue;
-      const v = JSON.parse(raw);
-
-      const fixedVoucher = {
-        ...v,
-        image: fix(v.image),
-      };
-
-      console.log("✨ CLEANED VOUCHER OBJECT:", fixedVoucher);
-      vouchers.push(fixedVoucher);
+    // -----------------------------
+    // METHOD CHECK
+    // -----------------------------
+    if (req.method !== "GET") {
+      return jsonResponse({ success: false, error: "Method not allowed" }, 405);
     }
 
-    const finalResponse = { success: true, vouchers };
+    // -----------------------------
+    // AUTH → GET companyId
+    // -----------------------------
+    const session = await auth(env, req);
 
-    console.log("📤 FINAL RESPONSE BODY:", finalResponse);
+    if (!session || !session.companyId) {
+      return jsonResponse({ success: false, error: "Unauthorized" }, 401);
+    }
 
-    return jsonResponse(finalResponse);
+    const companyId = session.companyId;
+
+    // -----------------------------
+    // LOAD INDEX: voucher:index:company:<companyId>
+    // -----------------------------
+    const idxKey = `voucher:index:company:${companyId}`;
+    const promoIds: string[] = (await env.KV.get(idxKey, { type: "json" })) || [];
+
+    const vouchers: Voucher[] = [];
+
+    // -----------------------------
+    // LOAD EACH VOUCHER
+    // -----------------------------
+    for (const promoId of promoIds) {
+      const raw = await env.KV.get(`voucher:${promoId}`, { type: "json" });
+      if (!raw) continue;
+
+      const v = raw as Voucher;
+
+      // Compute dynamic status
+      v.status = computeVoucherStatus(v);
+
+      vouchers.push(v);
+    }
+
+    // -----------------------------
+    // SUCCESS RESPONSE
+    // -----------------------------
+    return jsonResponse({ success: true, vouchers }, 200);
   } catch (err: any) {
-    console.error("❌ voucherList error:", err);
+    console.error("voucherList error:", err);
     return jsonResponse(
-      { success: false, error: "Failed to list vouchers" },
+      { success: false, error: "Failed to load vouchers", detail: String(err) },
       500
     );
   }

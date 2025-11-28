@@ -1,5 +1,5 @@
 
-import { getStoreById } from "../services/storeService";
+import { getStoreById } from "../../services/storeService";
 
 export const onRequestGet: PagesFunction = async (context) => {
   const { id } = context.params as { id: string };

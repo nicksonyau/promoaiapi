@@ -6,10 +6,11 @@ import {
   r2UrlForKey,
   jsonResponse,
 } from "../_lib/utils";
+import { auth } from "../../_lib/auth";
 
-// ==============================
-// TypeScript Types
-// ==============================
+// ------------------------------
+// Types
+// ------------------------------
 interface ProductInput {
   name: string;
   orgPrice: string;
@@ -18,7 +19,6 @@ interface ProductInput {
 }
 
 interface CampaignInput {
-  storeId: string;
   type: string;
   title: string;
   description?: string;
@@ -34,14 +34,15 @@ interface CampaignInput {
 
 interface Campaign extends CampaignInput {
   id: string;
+  companyId: string;
   r2Keys: string[];
   createdAt: string;
   updatedAt?: string;
 }
 
-// ==============================
-// CORS: OPTIONS preflight
-// ==============================
+// ------------------------------
+// OPTIONS (CORS)
+// ------------------------------
 export async function onRequestOptions() {
   return new Response(null, {
     status: 204,
@@ -53,273 +54,188 @@ export async function onRequestOptions() {
   });
 }
 
-// ==============================
-// Helper: Upload base64 → R2
-// ==============================
-async function uploadImage(
-  env: Env,
-  base64: string,
-  key: string
-): Promise<{ objectKey: string; url: string } | null> {
-  // Skip if not base64
+// ------------------------------
+// Upload base64 → R2
+// ------------------------------
+async function uploadImage(env: Env, base64: string, key: string) {
   if (!base64 || !base64.startsWith("data:")) return null;
+  if (!env.MY_R2_BUCKET) return null;
 
-  // Skip if R2 not configured
-  if (!env.MY_R2_BUCKET) {
-    console.warn("⚠️ R2 bucket not configured, skipping upload");
-    return null;
-  }
+  const m = base64.match(/^data:image\/([a-zA-Z0-9+]+);base64,/);
+  const ext = m ? m[1] : "png";
 
-  try {
-    // Extract image format
-    const m = base64.match(/^data:image\/([a-zA-Z0-9+]+);base64,/);
-    const ext = m ? m[1] : "png";
+  const objectKey = `campaigns/${key}_${Date.now()}.${ext}`;
+  const { buffer, contentType } = base64ToArrayBuffer(base64);
 
-    // Generate unique object key
-    const timestamp = Date.now();
-    const objectKey = `campaigns/${key}_${timestamp}.${ext}`;
+  await uploadToR2(env, objectKey, buffer, contentType);
 
-    // Convert and upload
-    const { buffer, contentType } = base64ToArrayBuffer(base64);
-    await uploadToR2(env, objectKey, buffer, contentType);
-
-    console.log(`✅ Uploaded to R2: ${objectKey}`);
-
-    return {
-      objectKey,
-      url: r2UrlForKey(objectKey),
-    };
-  } catch (error) {
-    console.error("❌ Error uploading to R2:", error);
-    return null;
-  }
+  return { objectKey, url: r2UrlForKey(objectKey) };
 }
 
-// ==============================
-// Validation Helper
-// ==============================
-function validateCampaignInput(body: any): {
-  valid: boolean;
-  error?: string;
-} {
-  if (!body.storeId || typeof body.storeId !== "string") {
-    return { valid: false, error: "Missing or invalid storeId" };
-  }
+// ------------------------------
+// Validation
+// ------------------------------
+function validateCampaignInput(body: any) {
+  if (!body.title || !body.title.trim())
+    return { valid: false, error: "Missing campaign title" };
 
-  if (!body.title || typeof body.title !== "string" || body.title.trim() === "") {
-    return { valid: false, error: "Missing or invalid title" };
-  }
+  if (!body.type)
+    return { valid: false, error: "Missing campaign type" };
 
-  if (!body.type || typeof body.type !== "string") {
-    return { valid: false, error: "Missing or invalid type" };
-  }
+  const allowedTypes = [
+    "flash-sale",
+    "seasonal",
+    "bundle",
+    "clearance",
+    "new-arrival",
+  ];
 
-  // Validate type is one of allowed values
-  const allowedTypes = ["flash-sale", "seasonal", "bundle", "clearance", "new-arrival"];
-  if (!allowedTypes.includes(body.type)) {
-    return { 
-      valid: false, 
-      error: `Invalid type. Must be one of: ${allowedTypes.join(", ")}` 
+  if (!allowedTypes.includes(body.type))
+    return {
+      valid: false,
+      error: `Invalid type. Must be: ${allowedTypes.join(", ")}`,
     };
-  }
-
-  // Validate dates if provided
-  if (body.startDate && isNaN(Date.parse(body.startDate))) {
-    return { valid: false, error: "Invalid startDate format" };
-  }
-
-  if (body.endDate && isNaN(Date.parse(body.endDate))) {
-    return { valid: false, error: "Invalid endDate format" };
-  }
-
-  if (body.startDate && body.endDate) {
-    const start = new Date(body.startDate);
-    const end = new Date(body.endDate);
-    if (end <= start) {
-      return { valid: false, error: "endDate must be after startDate" };
-    }
-  }
 
   return { valid: true };
 }
 
-// ==============================
+// ------------------------------
 // CREATE CAMPAIGN
-// ==============================
-export async function campaignCreateHandler(
-  req: Request,
-  env: Env
-): Promise<Response> {
+// ------------------------------
+export async function campaignCreateHandler(req: Request, env: Env) {
   try {
-    // Handle OPTIONS preflight
     if (req.method === "OPTIONS") return onRequestOptions();
+    if (req.method !== "POST")
+      return jsonResponse({ success: false, error: "Method not allowed" }, 405);
 
-    // Only accept POST
-    if (req.method !== "POST") {
-      return jsonResponse(
-        { success: false, error: "Method not allowed" },
-        405
-      );
-    }
+    // ------------------------------
+    // AUTH REQUIRED
+    // ------------------------------
+    const session = await auth(env, req);
+    if (!session || !session.companyId)
+      return jsonResponse({ success: false, error: "Unauthorised" }, 401);
 
-    // Parse request body
+    const companyId = session.companyId;
+
+    // ------------------------------
+    // Parse JSON
+    // ------------------------------
     let body: CampaignInput;
     try {
       body = await req.json();
-    } catch (error) {
-      return jsonResponse(
-        { success: false, error: "Invalid JSON in request body" },
-        400
-      );
+    } catch {
+      return jsonResponse({ success: false, error: "Invalid JSON" }, 400);
     }
 
-    // Validate input
+    // ------------------------------
+    // Validate
+    // ------------------------------
     const validation = validateCampaignInput(body);
-    if (!validation.valid) {
-      return jsonResponse(
-        { success: false, error: validation.error },
-        400
-      );
-    }
+    if (!validation.valid)
+      return jsonResponse({ success: false, error: validation.error }, 400);
 
-    // ==============================
-    // Generate Campaign ID
-    // ==============================
-    const timestamp = Date.now();
-    const randomStr = Math.random().toString(36).slice(2, 8);
-    const id = `campaign_${body.storeId}_${timestamp}_${randomStr}`;
+    // ------------------------------
+    // Create Campaign ID
+    // ------------------------------
+    const id =
+      "campaign_" +
+      companyId +
+      "_" +
+      Date.now() +
+      "_" +
+      Math.random().toString(36).slice(2, 8);
 
     const r2Keys: string[] = [];
 
-    // ==============================
-    // Upload bannerImage → R2
-    // ==============================
+    // ------------------------------
+    // Banner Upload
+    // ------------------------------
     let bannerImage = body.bannerImage || "";
-    let bannerImageUrl = "";
-
-    if (typeof bannerImage === "string" && bannerImage.startsWith("data:")) {
+    if (bannerImage.startsWith("data:")) {
       const upload = await uploadImage(env, bannerImage, `${id}/banner`);
       if (upload) {
-        bannerImageUrl = upload.url;
-        bannerImage = upload.url; // Store full URL
+        bannerImage = upload.url;
         r2Keys.push(upload.objectKey);
       }
-    } else if (bannerImage && bannerImage.startsWith("http")) {
-      // Already a URL, keep as-is
-      bannerImageUrl = bannerImage;
     }
 
-    // ==============================
-    // Upload each product image → R2
-    // ==============================
+    // ------------------------------
+    // Products
+    // ------------------------------
     const products = Array.isArray(body.products) ? body.products : [];
     const finalProducts: ProductInput[] = [];
 
     for (let i = 0; i < products.length; i++) {
-      const p = products[i];
-      let img = p.img || "";
+      let img = products[i].img || "";
 
-      if (typeof img === "string" && img.startsWith("data:")) {
-        const upload = await uploadImage(
-          env,
-          img,
-          `${id}/products/product-${i}`
-        );
+      if (img.startsWith("data:")) {
+        const upload = await uploadImage(env, img, `${id}/product-${i}`);
         if (upload) {
           img = upload.url;
           r2Keys.push(upload.objectKey);
         }
       }
 
-      finalProducts.push({
-        name: p.name || "",
-        orgPrice: p.orgPrice || "",
-        promoPrice: p.promoPrice || "",
-        img,
-      });
+      finalProducts.push({ ...products[i], img });
     }
 
-    // ==============================
-    // Create campaign object
-    // ==============================
+    // ------------------------------
+    // Build Campaign Record
+    // ------------------------------
     const now = new Date().toISOString();
+
     const newCampaign: Campaign = {
       id,
-      storeId: body.storeId,
+      companyId,
       type: body.type,
       title: body.title.trim(),
-      description: body.description?.trim() || "",
-      bannerImage, // Full URL
-      bannerImageUrl, // Explicitly set for consistency
+      description: body.description || "",
+      bannerImage,
       products: finalProducts,
       cta: {
-        whatsapp: body.cta?.whatsapp?.trim() || "",
-        orderUrl: body.cta?.orderUrl?.trim() || "",
+        whatsapp: body.cta?.whatsapp || "",
+        orderUrl: body.cta?.orderUrl || "",
       },
       startDate: body.startDate || now,
       endDate: body.endDate || "",
-      r2Keys, // Track uploaded files for cleanup
+      r2Keys,
       createdAt: now,
     };
 
-    // ==============================
-    // Load existing campaigns
-    // ==============================
-    let campaigns: Campaign[];
-    try {
-      const raw = await env.KV.get("campaigns", { type: "json" });
-      campaigns = (raw as Campaign[]) || [];
-    } catch (error) {
-      console.error("❌ Error reading campaigns from KV:", error);
-      campaigns = [];
-    }
+    // ------------------------------
+    // OLD STORAGE (Dashboard)
+    // ------------------------------
+    const kvKey = `campaigns:${companyId}`;
+    const existing =
+      ((await env.KV.get(kvKey, { type: "json" })) as Campaign[]) || [];
+    existing.push(newCampaign);
+    await env.KV.put(kvKey, JSON.stringify(existing));
 
-    // Check for duplicate ID (extremely unlikely but safe)
-    const exists = campaigns.some((c) => c.id === id);
-    if (exists) {
-      return jsonResponse(
-        { success: false, error: "Campaign ID conflict, please retry" },
-        409
-      );
-    }
+    // ------------------------------
+    // NEW STORAGE (Chatbot)
+    // ------------------------------
+    // 1) Single record
+    await env.KV.put(`campaign:${id}`, JSON.stringify(newCampaign));
 
-    // ==============================
-    // Save to KV
-    // ==============================
-    campaigns.push(newCampaign);
+    // 2) Index of campaign IDs
+    const indexKey = `campaign:index:company:${companyId}`;
+    const indexList: string[] =
+      (await env.KV.get(indexKey, { type: "json" })) || [];
 
-    try {
-      await env.KV.put("campaigns", JSON.stringify(campaigns));
-      console.log(`✅ Campaign created: ${id}`);
-    } catch (error) {
-      console.error("❌ Error saving to KV:", error);
-      return jsonResponse(
-        { success: false, error: "Failed to save campaign to database" },
-        500
-      );
-    }
+    indexList.push(id);
 
-    // ==============================
-    // Success Response
-    // ==============================
+    await env.KV.put(indexKey, JSON.stringify(indexList));
+
+    // ------------------------------
+    // Success
+    // ------------------------------
     return jsonResponse(
-      {
-        success: true,
-        id,
-        campaign: newCampaign,
-        message: "Campaign created successfully",
-      },
+      { success: true, id, campaign: newCampaign },
       201
     );
   } catch (err: any) {
-    console.error("❌ campaignCreateHandler error:", err);
-
     return jsonResponse(
-      {
-        success: false,
-        error: "Internal server error",
-        details: err?.message || "Unknown error",
-      },
+      { success: false, error: "Internal error", details: err.message },
       500
     );
   }

@@ -1,13 +1,12 @@
-// File: src/routes/campaignList.ts
+// File: src/routes/campaign/campaignList.ts
 import { Env } from "../index";
 import { jsonResponse } from "../_lib/utils";
+import { requireCompany } from "../../_lib/auth";
 
-// ==============================
-// TypeScript Types
-// ==============================
+// Types
 interface Campaign {
   id: string;
-  storeId: string;
+  companyId: string;
   type: string;
   title: string;
   description?: string;
@@ -23,7 +22,6 @@ interface Campaign {
 
 interface CampaignListItem {
   id: string;
-  storeId: string;
   title: string;
   type: string;
   description?: string;
@@ -37,83 +35,52 @@ interface CampaignListItem {
   status: "active" | "expired" | "upcoming";
 }
 
-// ==============================
-// CORS Headers
-// ==============================
+// CORS
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
 };
 
-// ==============================
-// Helper: Fix Image URL
-// ==============================
-function fixImageUrl(env: Env, val: any): string | null {
-  if (!val) return null;
-  if (typeof val !== "string") return null;
+// Fix Image URL
+function fixImageUrl(env: Env, val?: string | null): string | null {
+  if (!val || typeof val !== "string") return null;
+  if (val.startsWith("http://") || val.startsWith("https://")) return val;
 
-  // Already a full URL
-  if (val.startsWith("http://") || val.startsWith("https://")) {
-    return val;
-  }
+  const base =
+    env.WORKER_URL ||
+    env.CF_PAGES_URL ||
+    "http://localhost:8787";
 
-  // Base worker URL (from env or default)
-  const base = env.WORKER_URL || "http://localhost:8787";
-
-  // Normalize path: remove "/r2/" or "r2/" prefix and leading slashes
-  let cleaned = val
+  const cleaned = val
     .replace(/^\/r2\//, "")
     .replace(/^r2\//, "")
     .replace(/^\/+/, "");
 
-  // Return full URL
   return `${base}/r2/${cleaned}`;
 }
 
-// ==============================
-// Helper: Determine Campaign Status
-// ==============================
+// Status helper
 function getCampaignStatus(
   startDate?: string,
   endDate?: string
 ): "active" | "expired" | "upcoming" {
   const now = new Date();
-
-  if (endDate) {
-    const end = new Date(endDate);
-    if (end < now) {
-      return "expired";
-    }
-  }
-
-  if (startDate) {
-    const start = new Date(startDate);
-    if (start > now) {
-      return "upcoming";
-    }
-  }
-
+  if (endDate && new Date(endDate) < now) return "expired";
+  if (startDate && new Date(startDate) > now) return "upcoming";
   return "active";
 }
 
-// ==============================
-// GET CAMPAIGN LIST
-// ==============================
+// Handler
 export async function campaignListHandler(
   req: Request,
   env: Env
 ): Promise<Response> {
   try {
-    // Handle OPTIONS preflight
     if (req.method === "OPTIONS") {
-      return new Response(null, {
-        status: 204,
-        headers: CORS_HEADERS,
-      });
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
     }
 
-    // Only accept GET
     if (req.method !== "GET") {
       return jsonResponse(
         { success: false, error: "Method not allowed" },
@@ -121,9 +88,16 @@ export async function campaignListHandler(
       );
     }
 
-    // Parse query parameters
+    // 🔒 Auth + company
+    const auth = await requireCompany(env, req);
+    if (!auth)
+      return jsonResponse({ success: false, error: "Unauthorized" }, 401);
+
+    const { companyId } = auth;
+    const kvKey = `campaigns:${companyId}`; // ✅ SAME AS CREATE
+
+    // Query params
     const url = new URL(req.url);
-    const storeId = url.searchParams.get("storeId");
     const type = url.searchParams.get("type");
     const status = url.searchParams.get("status");
     const sortBy = url.searchParams.get("sortBy") || "createdAt";
@@ -131,55 +105,25 @@ export async function campaignListHandler(
     const limit = parseInt(url.searchParams.get("limit") || "100");
     const offset = parseInt(url.searchParams.get("offset") || "0");
 
-    // ==============================
-    // Load campaigns from KV
-    // ==============================
-    let campaigns: Campaign[];
-    try {
-      const raw = await env.KV.get("campaigns", { type: "json" });
-      campaigns = (raw as Campaign[]) || [];
-    } catch (error) {
-      console.error("❌ Error loading campaigns from KV:", error);
-      return jsonResponse(
-        { success: false, error: "Failed to load campaigns from database" },
-        500
-      );
-    }
+    // Load campaigns
+    const raw = await env.KV.get(kvKey, { type: "json" });
+    const campaigns: Campaign[] = (raw as Campaign[]) || [];
 
-    // ==============================
-    // Filter campaigns
-    // ==============================
+    // Filter
     let filtered = campaigns;
+    if (type) filtered = filtered.filter((c) => c.type === type);
+    if (status)
+      filtered = filtered.filter(
+        (c) => getCampaignStatus(c.startDate, c.endDate) === status
+      );
 
-    // Filter by storeId
-    if (storeId) {
-      filtered = filtered.filter((c) => c.storeId === storeId);
-    }
-
-    // Filter by type
-    if (type) {
-      filtered = filtered.filter((c) => c.type === type);
-    }
-
-    // Filter by status
-    if (status) {
-      filtered = filtered.filter((c) => {
-        const campaignStatus = getCampaignStatus(c.startDate, c.endDate);
-        return campaignStatus === status;
-      });
-    }
-
-    // ==============================
-    // Map to list items with fixed URLs
-    // ==============================
+    // Map to list items
     const list: CampaignListItem[] = filtered.map((c) => {
-      // Fix banner image URLs
       const bannerImage = fixImageUrl(env, c.bannerImage || c.bannerImageUrl);
       const bannerImageUrl = fixImageUrl(env, c.bannerImageUrl || c.bannerImage);
 
       return {
         id: c.id,
-        storeId: c.storeId,
         title: c.title || "",
         type: c.type || "",
         description: c.description || "",
@@ -194,40 +138,24 @@ export async function campaignListHandler(
       };
     });
 
-    // ==============================
-    // Sort campaigns
-    // ==============================
+    // Sort
     list.sort((a, b) => {
-      let aVal: any = a[sortBy as keyof CampaignListItem];
-      let bVal: any = b[sortBy as keyof CampaignListItem];
+      let aVal = a[sortBy as keyof CampaignListItem];
+      let bVal = b[sortBy as keyof CampaignListItem];
 
-      // Handle null/undefined
-      if (aVal === null || aVal === undefined) return 1;
-      if (bVal === null || bVal === undefined) return -1;
-
-      // Sort dates
-      if (sortBy === "createdAt" || sortBy === "updatedAt" || sortBy === "startDate" || sortBy === "endDate") {
+      if (typeof aVal === "string" && sortBy.includes("Date")) {
         aVal = new Date(aVal).getTime();
-        bVal = new Date(bVal).getTime();
+        bVal = new Date(bVal as string).getTime();
       }
 
-      // Compare
-      if (sortOrder === "desc") {
-        return bVal > aVal ? 1 : bVal < aVal ? -1 : 0;
-      } else {
-        return aVal > bVal ? 1 : aVal < bVal ? -1 : 0;
-      }
+      if (sortOrder === "desc") return (aVal as any) < (bVal as any) ? 1 : -1;
+      return (aVal as any) > (bVal as any) ? 1 : -1;
     });
 
-    // ==============================
     // Pagination
-    // ==============================
     const total = list.length;
     const paginated = list.slice(offset, offset + limit);
 
-    // ==============================
-    // Success response
-    // ==============================
     return new Response(
       JSON.stringify({
         success: true,
@@ -239,7 +167,6 @@ export async function campaignListHandler(
           hasMore: offset + limit < total,
         },
         filters: {
-          storeId: storeId || null,
           type: type || null,
           status: status || null,
         },
@@ -254,13 +181,8 @@ export async function campaignListHandler(
     );
   } catch (err: any) {
     console.error("❌ campaignListHandler error:", err);
-
     return jsonResponse(
-      {
-        success: false,
-        error: "Internal server error",
-        details: err?.message || "Unknown error",
-      },
+      { success: false, error: "Internal server error" },
       500
     );
   }

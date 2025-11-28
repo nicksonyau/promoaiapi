@@ -4,11 +4,11 @@ import { adminUsersHandler } from "./routes/adminUsers";
 import { logsHandler } from "./routes/logs";
 import { userLogsHandler } from "./routes/userLogs";
 
-import { uploadTemplateHandler } from "./routes/fnbTemplateUpload";
-import { listTemplatesHandler } from "./routes/fnbTemplatesList";
-import { updateTemplateHandler } from "./routes/fnbTemplateUpdate";
-import { getTemplateHandler } from "./routes/fnbTemplateGet";
-import { deleteTemplateHandler } from "./routes/fnbTemplateDelete";
+import { uploadTemplateHandler } from "./routes/templates/fnbTemplateUpload";
+import { listTemplatesHandler } from "./routes/templates/fnbTemplatesList";
+import { updateTemplateHandler } from "./routes/templates/fnbTemplateUpdate";
+import { getTemplateHandler } from "./routes/templates/fnbTemplateGet";
+import { deleteTemplateHandler } from "./routes/templates/fnbTemplateDelete";
 
 import { storeCreateHandler } from "./routes/store/storeCreate";
 import { storeListHandler } from "./routes/store/storeList";
@@ -64,7 +64,18 @@ import { r2PublicGetHandler } from "./routes/r2PublicGetHandler";
 import { storePublishHandler } from "./routes/store/storePublish";
 import { resendVerificationHandler } from "./routes/resend";
 
+import { publicCampaignList } from "./routes/public/campaignList";
+import { pubVoucherList } from "./routes/public/pubVoucherList";
 
+import { chatbotSourceAddHandler } from "./routes/chatbot/sourceAdd";
+import { chatbotSourceListHandler } from "./routes/chatbot/sourceList";
+import { chatbotSourceDeleteHandler } from "./routes/chatbot/sourceDelete";
+import { chatbotSourceProcessHandler } from "./routes/chatbot/sourceProcess";
+import { chatbotFileUploadHandler } from "./routes/chatbot/file/upload";
+import { chatbotFileListHandler } from "./routes/chatbot/file/list";
+import { chatbotFileDeleteHandler } from "./routes/chatbot/file/delete";
+import { chatbotFileProcessHandler } from "./routes/chatbot/file/process";
+ 
 // ------------------------
 // ENV INTERFACE (FINALIZED)
 // ------------------------
@@ -223,8 +234,10 @@ if (path === "/resend" && req.method === "POST")
       if (path.startsWith("/store/delete/") && req.method === "DELETE")
         return withCors(await storeDeleteHandler(req, env));
 
-      if (path === "/stores" && req.method === "GET")
-        return withCors(await storeListHandler(req, env));
+      if (url.pathname === "/store/list" && req.method === "GET") {
+       return withCors(await storeListHandler(req, env));
+      }
+
 
       if (path.startsWith("/stores/name/") && req.method === "GET")
         return withCors(await storeGetByNameHandler(req, env));
@@ -307,6 +320,37 @@ if (path === "/resend" && req.method === "POST")
 
       if (path.startsWith("/voucher/update/") && req.method === "PUT")
         return withCors(await voucherUpdateHandler(req, env));
+
+    if (path === "/public/voucher/list" && req.method === "GET") {
+      return withCors(await pubVoucherList(req, env));
+    }
+if (path === "/chatbot/sources/add" && req.method === "POST")
+  return withCors(await chatbotSourceAddHandler(req, env));
+
+if (path.startsWith("/chatbot/sources/list/") && req.method === "GET")
+  return withCors(await chatbotSourceListHandler(req, env, path.split("/").pop()!));
+
+if (path.startsWith("/chatbot/sources/delete/") && req.method === "DELETE")
+  return withCors(await chatbotSourceDeleteHandler(req, env, path.split("/").pop()!));
+if (path.startsWith("/chatbot/sources/process/") && req.method === "POST")
+  return withCors(await chatbotSourceProcessHandler(req, env, path.split("/").pop()!));
+
+// ------------------------
+// CHATBOT FILE SOURCES
+// ------------------------
+if (path === "/chatbot/files/upload" && req.method === "POST")
+  return withCors(await chatbotFileUploadHandler(req, env));
+
+if (path.startsWith("/chatbot/files/list/") && req.method === "GET")
+  return withCors(await chatbotFileListHandler(req, env, path.split("/").pop()!));
+
+if (path.startsWith("/chatbot/files/delete/") && req.method === "DELETE")
+  return withCors(await chatbotFileDeleteHandler(req, env, path.split("/").pop()!));
+
+if (path.startsWith("/chatbot/files/process/") && req.method === "POST")
+  return withCors(await chatbotFileProcessHandler(req, env, path.split("/").pop()!));
+
+
 
       // ------------------------
       // NOT FOUND

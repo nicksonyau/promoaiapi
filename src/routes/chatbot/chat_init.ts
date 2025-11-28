@@ -1,3 +1,4 @@
+// src/routes/chatbot/chat_init.ts
 import { Env } from "../../index";
 
 export const chatInitHandler = async (req: Request, env: Env): Promise<Response> => {
@@ -12,7 +13,7 @@ export const chatInitHandler = async (req: Request, env: Env): Promise<Response>
       );
     }
 
-    // Load config from the correct KV namespace
+    // Load config (PUBLIC)
     const settingsRaw = await env.chatbotconfig.get(`config:${chatbotId}`);
     if (!settingsRaw) {
       return Response.json(
