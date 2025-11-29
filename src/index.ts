@@ -63,7 +63,6 @@ import { r2ProxyHandler } from "./routes/r2Proxy";
 import { r2PublicGetHandler } from "./routes/r2PublicGetHandler";
 import { storePublishHandler } from "./routes/store/storePublish";
 import { resendVerificationHandler } from "./routes/resend";
-
 import { publicCampaignList } from "./routes/public/campaignList";
 import { pubVoucherList } from "./routes/public/pubVoucherList";
 
@@ -75,6 +74,11 @@ import { chatbotFileUploadHandler } from "./routes/chatbot/file/upload";
 import { chatbotFileListHandler } from "./routes/chatbot/file/list";
 import { chatbotFileDeleteHandler } from "./routes/chatbot/file/delete";
 import { chatbotFileProcessHandler } from "./routes/chatbot/file/process";
+import { chatbotFileTextUploadHandler } from "./routes/chatbot/file/uploadText";
+import { chatbotFileUploadToGPTHandler } from "./routes/chatbot/file/uploadToGPT";
+import { chatbotFileAskGPTHandler } from "./routes/chatbot/file/askGPT";
+
+
  
 // ------------------------
 // ENV INTERFACE (FINALIZED)
@@ -350,7 +354,17 @@ if (path.startsWith("/chatbot/files/delete/") && req.method === "DELETE")
 if (path.startsWith("/chatbot/files/process/") && req.method === "POST")
   return withCors(await chatbotFileProcessHandler(req, env, path.split("/").pop()!));
 
+if (path === "/chatbot/files/uploadText" && req.method === "POST")
+  return withCors(await chatbotFileTextUploadHandler(req, env));
 
+if (path.startsWith("/chatbot/files/uploadToGPT/") && req.method === "POST") {
+  const id = path.split("/").pop()!;
+  return withCors(await chatbotFileUploadToGPTHandler(req, env, id));
+}
+if (req.method === "POST" && path.startsWith("/chatbot/files/askGPT/")) {
+  const id = path.split("/").pop()!;
+  return withCors(await chatbotFileAskGPTHandler(req, env, id));
+}
 
       // ------------------------
       // NOT FOUND

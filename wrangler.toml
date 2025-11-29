@@ -42,4 +42,3 @@ WORKER_URL = "http://127.0.0.1:8787"
 binding = "MY_R2_BUCKET"
 bucket_name = "promoai-images"          # Production bucket
 preview_bucket_name = "promoai-images-dev"   # Dev bucket created just now
-

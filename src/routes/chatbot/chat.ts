@@ -20,7 +20,7 @@ function cosineSim(a: number[], b: number[]) {
 }
 
 // ----------------------------------------------------
-// LOAD INDEXED SOURCES (CHEERIO OUTPUT)
+// LOAD WEBSITE RAG
 // ----------------------------------------------------
 async function loadIndexedSources(env: Env, chatbotId: string) {
   const indexKey = `chatbot:sources:${chatbotId}`;
@@ -42,50 +42,88 @@ async function loadIndexedSources(env: Env, chatbotId: string) {
     });
   }
 
-  console.log("📚 INDEXED WEBSITE CHUNKS:", chunks.length);
+  console.log("🌐 WEBSITE CHUNKS:", chunks.length);
+  return chunks;
+}
 
+// ----------------------------------------------------
+// ✅ LOAD PDF / FILE VECTORS
+// ----------------------------------------------------
+async function loadIndexedFiles(env: Env, chatbotId: string) {
+  const prefix = `chatbot:vector:${chatbotId}:`;
+  const keys = await env.chatbotconfig.list({ prefix });
+
+  const chunks: { text: string; url: string; vec: number[] }[] = [];
+
+  for (const k of keys.keys) {
+    const rec: any = await env.chatbotconfig.get(k.name, { type: "json" });
+    if (!rec || !rec.embedding || !rec.text) continue;
+
+    chunks.push({
+      text: rec.text,
+      vec: rec.embedding,
+      url: rec.fileName || "PDF"
+    });
+  }
+
+  console.log("📄 PDF CHUNKS:", chunks.length);
   return chunks;
 }
 
 // ----------------------------------------------------
 // VECTOR SEARCH
 // ----------------------------------------------------
-async function searchVectors(
-  env: Env,
-  question: string,
-  chunks: any[]
-) {
+async function searchVectors(env: Env, question: string, chunks: any[]) {
   const qVec = await embed(env, question);
 
   const ranked = chunks
-    .map(chunk => ({
-      ...chunk,
-      score: cosineSim(qVec, chunk.vec)
-    }))
+    .map(chunk => {
+      const boost = chunk.url === "PDF" ? 0.05 : 0; // ✅ Prioritize PDFs
+      return {
+        ...chunk,
+        score: cosineSim(qVec, chunk.vec) + boost
+      };
+    })
     .sort((a, b) => b.score - a.score)
     .slice(0, 5);
 
   console.log("🔍 Top matches:");
   ranked.forEach((r, i) =>
-    console.log(`#${i + 1} [${r.score.toFixed(4)}]`, r.text.slice(0, 90))
+    console.log(`#${i + 1} [${r.score.toFixed(4)}]`, r.text.slice(0, 120))
   );
 
-  return ranked.filter(x => x.score > 0.73);
+  // ✅ LOWER threshold so matches aren't discarded
+  const THRESHOLD = 0.60;
+
+  const accepted = ranked.filter(x => x.score > THRESHOLD);
+
+  accepted.forEach(x =>
+    console.log("✅ ACCEPTED:", x.score.toFixed(4), x.text.slice(0, 80))
+  );
+
+  ranked
+    .filter(x => x.score <= THRESHOLD)
+    .forEach(x =>
+      console.log("❌ REJECTED:", x.score.toFixed(4), x.text.slice(0, 80))
+    );
+
+  return accepted;
 }
 
+
 // ----------------------------------------------------
-// ANSWER VIA WEBSITE KNOWLEDGE
+// ANSWER FROM RAG
 // ----------------------------------------------------
-async function answerFromWebsite(env: Env, question: string, matches: any[]) {
+async function answerFromKnowledge(env: Env, question: string, matches: any[]) {
   const material = matches
     .map(m => `SOURCE: ${m.url}\n${m.text}`)
     .join("\n\n---\n\n");
 
   const prompt = `
-Answer the QUESTION using ONLY the WEBSITE DATA below.
-If not found, reply: NOT_FOUND.
+Answer using ONLY the knowledge below.
+If answer not found reply: NOT_FOUND.
 
---- WEBSITE DATA ---
+--- KNOWLEDGE ---
 ${material}
 --- END ---
 
@@ -93,13 +131,12 @@ QUESTION:
 ${question}
 
 Rules:
-- No hallucination
-- Summarise cleanly
-- Quote facts if possible
+- Do not hallucinate
+- Quote facts if needed
+- Be concise
 `.trim();
 
   const result = await env.AI.run("@cf/meta/llama-3.1-8b-instruct", { prompt });
-
   return result.response.trim();
 }
 
@@ -129,17 +166,22 @@ export const chatHandler = async (req: Request, env: Env) => {
     const history = JSON.parse(await env.CHAT_HISTORY_KV.get(historyKey) || "[]");
 
     // ------------------------------------------------
-    // ✅ RAG FIRST: VECTOR SEARCH
+    // ✅ HYBRID RAG
     // ------------------------------------------------
-    const chunks = await loadIndexedSources(env, chatbotId);
+    const webChunks = await loadIndexedSources(env, chatbotId);
+    const fileChunks = await loadIndexedFiles(env, chatbotId);
 
-    if (chunks.length > 0) {
-      const matches = await searchVectors(env, message, chunks);
+    const all = [...webChunks, ...fileChunks];
+
+    console.log(`📚 TOTAL SEARCH CHUNKS: ${all.length}`);
+
+    if (all.length > 0) {
+      const matches = await searchVectors(env, message, all);
 
       if (matches.length > 0) {
-        console.log("✅ WEBSITE MATCH FOUND");
+        console.log("✅ KNOWLEDGE MATCH FOUND");
 
-        const answer = await answerFromWebsite(env, message, matches);
+        const answer = await answerFromKnowledge(env, message, matches);
 
         if (!answer.includes("NOT_FOUND")) {
           const newHistory = [...history,
@@ -151,31 +193,35 @@ export const chatHandler = async (req: Request, env: Env) => {
 
           return Response.json({
             success: true,
-            source: "website",
+            source: "rag",
             reply: answer,
             matches: matches.length
           });
         }
 
-        console.log("⚠️ Website matched but did not answer");
+        console.log("⚠️ RAG MATCH BUT NO ANSWER");
       }
     }
 
     // ------------------------------------------------
-    // FALLBACK: INTENT AI
+    // FALLBACK INTENT AI
     // ------------------------------------------------
     console.log("➡️ Fallback to intent system");
 
-    const menuLines = (config.quickMenu || "").split("\n").map((x: string) => x.trim()).filter(Boolean);
+    const menuLines = (config.quickMenu || "")
+      .split("\n")
+      .map((x: string) => x.trim())
+      .filter(Boolean);
 
     const prompt = `
-Select intent from:
+Select intent:
+
 ${menuLines.map(m => "- " + m).join("\n")}
 
-Return JSON ONLY:
+Return JSON:
 {
   "intent": string,
-  "confidence": "high" | "medium" | "low"
+  "confidence": "high"|"medium"|"low"
 }
 
 Message: "${message}"
@@ -191,7 +237,6 @@ Message: "${message}"
     }
 
     const category = routeIntent(parsed.intent, message);
-
     let finalReply = config.fallbackMessage || "Can you clarify?";
 
     switch (category) {

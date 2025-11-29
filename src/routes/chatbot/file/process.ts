@@ -1,33 +1,56 @@
+// routes/chatbot/file/process.ts
+
 import { jsonResponse } from "../../_lib/utils";
 import { auth } from "../../../_lib/auth";
+import { Env } from "../../index"; // Assuming Env is exported from index.ts
 
-const OPENAI_EMBEDDING_URL = "https://api.openai.com/v1/embeddings";
-const EMBEDDING_MODEL = "text-embedding-3-small";
+const MAX_CHUNKS = 100; // hard guardrail to prevent abuse
 
-export async function chatbotFileProcessHandler(req: Request, env: any, id: string) {
+// ------------------------------------------------------------
+// CLOUDFLARE AI EMBEDDING
+// ------------------------------------------------------------
+async function embed(env: Env, text: string): Promise<number[]> {
+  if (!env.AI) throw new Error("Cloudflare AI binding missing.");
+  const result = await env.AI.run("@cf/baai/bge-base-en-v1.5", {
+    text: [text],
+  });
+  // Ensure the result format is correct before returning
+  if (!result || !result.data || !Array.isArray(result.data[0])) {
+      throw new Error("Invalid response format from Cloudflare AI embedding.");
+  }
+  return result.data[0]; // embedding vector
+}
+
+// ------------------------------------------------------------
+// TEXT CHUNKING
+// ------------------------------------------------------------
+function chunk(text: string, size = 900) {
+  const out: string[] = [];
+  for (let i = 0; i < text.length; i += size) out.push(text.slice(i, i + size));
+  return out;
+}
+
+
+export async function chatbotFileProcessHandler(req: Request, env: Env, id: string) {
   console.log("================================");
-  console.log("⚙️ PROCESS START:", id);
+  console.log("⚙️ FILE PROCESS START:", id);
   console.log("================================");
 
   // -----------------------
-  // 1) AUTH
+  // AUTH
   // -----------------------
   const session = await auth(env, req);
-  if (!session?.companyId) {
-    console.log("❌ Unauthorized");
+  if (!session?.companyId)
     return jsonResponse({ error: "Unauthorized" }, 401);
-  }
 
   // -----------------------
-  // 2) LOAD METADATA
+  // LOAD METADATA
   // -----------------------
-  if (!env.chatbotconfig) {
-    console.log("❌ KV binding missing");
+  if (!env.chatbotconfig)
     return jsonResponse({ error: "KV binding missing" }, 500);
-  }
 
   const key = `chatbot:file:${id}`;
-  const file = await env.chatbotconfig.get(key, { type: "json" });
+  const file: any = await env.chatbotconfig.get(key, { type: "json" });
 
   console.log("📦 FILE RECORD:", file);
 
@@ -35,118 +58,103 @@ export async function chatbotFileProcessHandler(req: Request, env: any, id: stri
   if (file.companyId !== session.companyId)
     return jsonResponse({ error: "Access denied" }, 403);
 
-  // Normalize filename
   const fileName = file.name || file.filename || file.originalName || "unknown";
-  const r2Key = file.r2Key;
+  
+  // ✅ NEW: Use textKey to find the extracted text in R2
+  const textR2Key = file.textKey; 
 
-  if (!r2Key) {
-    console.log("❌ Missing r2Key in record");
-    return jsonResponse({ error: "File storage path missing" }, 500);
-  }
+  if (!textR2Key) // Check for the presence of the text key
+    return jsonResponse({ error: "Extracted text storage path (textKey) missing" }, 500);
 
   // -----------------------
-  // 3) LOAD FROM R2 (FIXED)
+  // LOAD EXTRACTED TEXT FROM R2 (using textR2Key)
   // -----------------------
-  if (!env.MY_R2_BUCKET) {
-    console.log("❌ R2 binding missing: env.MY_R2_BUCKET");
+  if (!env.MY_R2_BUCKET)
     return jsonResponse({ error: "Storage not configured (R2 missing)" }, 500);
-  }
 
-  console.log("☁️ LOADING R2:", r2Key);
-
-  const obj = await env.MY_R2_BUCKET.get(r2Key);
-  if (!obj) {
-    console.log("❌ File missing in R2:", r2Key);
-    return jsonResponse({ error: "File missing in storage" }, 404);
-  }
+  const obj = await env.MY_R2_BUCKET.get(textR2Key);
+  if (!obj)
+    return jsonResponse({ error: `Extracted text missing in storage at ${textR2Key}` }, 404);
 
   const buffer = await obj.arrayBuffer();
-  console.log("📄 File bytes:", buffer.byteLength);
+  console.log("📄 TEXT BYTES:", buffer.byteLength);
 
   // -----------------------
-  // 4) EXTRACT TEXT
+  // TEXT EXTRACTION
   // -----------------------
   let text = "";
-  try {
-    text = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
-  } catch (err) {
-    console.log("❌ Text decode failed", err);
-    return jsonResponse({ error: "Cannot decode file content" }, 400);
-  }
 
-  if (!text.trim()) {
-    console.log("❌ Empty content");
-    return jsonResponse({ error: "Empty file" }, 400);
+  try {
+    // Decode the R2 buffer which is the UTF-8 text file.
+    text = new TextDecoder().decode(buffer);
+  } catch (err) {
+    return jsonResponse({ error: "Text decode failed" }, 400);
   }
+  // LOG THE DECODED TEXT VALUE
+  console.log("📄 ==========================DECODED TEXT VALUE:", text);
+
+  if (!text.trim())
+    return jsonResponse({ error: "File contains no readable text" }, 400);
 
   console.log("🧾 TEXT LENGTH:", text.length);
 
   // -----------------------
-  // 5) CHUNK TEXT
+  // CHUNKING (using shared chunk logic)
   // -----------------------
-  const chunks = chunkText(text, 500);
+  const chunks = chunk(text, 900).slice(0, MAX_CHUNKS);
   console.log("✂️ CHUNKS:", chunks.length);
 
   // -----------------------
-  // 6) VERIFY OPENAI KEY
+  // CLOUDFLARE AI CHECK
   // -----------------------
-  if (!env.OPENAI_API_KEY) {
-    console.log("❌ OPENAI_API_KEY missing");
-    return jsonResponse({ error: "OpenAI not configured" }, 500);
-  }
+  if (!env.AI)
+    return jsonResponse({ error: "Cloudflare AI not configured" }, 500);
 
   // -----------------------
-  // 7) EMBEDDINGS
+  // EMBEDDINGS (using shared embed logic)
   // -----------------------
   const vectors = [];
 
   for (let i = 0; i < chunks.length; i++) {
     console.log(`🧠 Embedding ${i + 1}/${chunks.length}`);
 
-    const res = await fetch(OPENAI_EMBEDDING_URL, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${env.OPENAI_API_KEY}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: EMBEDDING_MODEL,
-        input: chunks[i],
-      }),
-    });
-
-    const data = await res.json();
-    const vector = data?.data?.[0]?.embedding;
-
-    if (!vector) {
-      console.log("❌ OpenAI error:", data);
-      return jsonResponse({ error: "Embedding failed" }, 502);
+    try {
+      // Call the shared embed function using Cloudflare AI
+      const vector = await embed(env, chunks[i]); 
+      
+      vectors.push({
+        chatbotId: file.chatbotId,
+        companyId: file.companyId,
+        fileId: id,
+        fileName,
+        index: i,
+        text: chunks[i],
+        embedding: vector,
+      });
+    } catch (e: any) {
+      console.error("❌ Embedding failed for chunk:", i, e.message);
+      // Fail the whole process and mark file as error
+      file.status = "error";
+      file.updatedAt = Date.now();
+      await env.chatbotconfig.put(key, JSON.stringify(file));
+      return jsonResponse({ error: `Embedding service failed: ${e.message}` }, 502);
     }
-
-    vectors.push({
-      chatbotId: file.chatbotId,
-      companyId: file.companyId,
-      fileId: id,
-      fileName,
-      index: i,
-      text: chunks[i],
-      embedding: vector,
-    });
   }
 
-  console.log("✅ VECTORS CREATED:", vectors.length);
+  console.log("✅ VECTORS:", vectors.length);
 
   // -----------------------
-  // 8) STORE VECTORS
+  // STORE VECTORS
   // -----------------------
   for (let i = 0; i < vectors.length; i++) {
-    const vKey = `chatbot:vector:${file.chatbotId}:${id}:${i}`;
-    await env.chatbotconfig.put(vKey, JSON.stringify(vectors[i]));
-    console.log("💾 Stored:", vKey);
+    await env.chatbotconfig.put(
+      `chatbot:vector:${file.chatbotId}:${id}:${i}`,
+      JSON.stringify(vectors[i])
+    );
   }
 
   // -----------------------
-  // 9) UPDATE FILE STATUS
+  // FINAL UPDATE
   // -----------------------
   file.status = "indexed";
   file.updatedAt = Date.now();
@@ -154,21 +162,11 @@ export async function chatbotFileProcessHandler(req: Request, env: any, id: stri
 
   await env.chatbotconfig.put(key, JSON.stringify(file));
 
-  console.log("✅ PROCESS COMPLETED:", id);
+  console.log("✅ PROCESS COMPLETE");
 
   return jsonResponse({
     success: true,
     indexed: true,
-    vectors: vectors.length,
+    vectors: vectors.length
   });
-}
-
-function chunkText(text: string, size = 500) {
-  const out: string[] = [];
-  let i = 0;
-  while (i < text.length) {
-    out.push(text.slice(i, i + size));
-    i += size;
-  }
-  return out;
 }
