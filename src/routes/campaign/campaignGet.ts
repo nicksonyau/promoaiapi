@@ -1,5 +1,5 @@
 // File: src/routes/campaign/campaignGet.ts
-import { Env } from "../index";
+import { Env } from "../../index";
 import { jsonResponse } from "../_lib/utils";
 import { requireCompany } from "../../_lib/auth";
 

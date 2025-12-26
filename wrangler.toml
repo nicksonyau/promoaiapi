@@ -12,6 +12,7 @@ binding = "AI"
 # ✅ KV BINDINGS
 #######################
 
+
 [[kv_namespaces]]
 binding = "KV"
 id = "feb043d71025470f8d1574f9cf956bce"
@@ -36,9 +37,21 @@ preview_id = "04b7f1d29d0e444ab480225406e6df51" # <-- preview
 RESEND_API_KEY = "re_V6chGrq3_A5hE8nvaXc48cCKke8e13sBN"
 FRONTEND_URL = "http://localhost:3000"
 WORKER_URL = "http://127.0.0.1:8787"
+ 
+APP_BASE_URL = "http://localhost:3000"
+STRIPE_SECRET_KEY = "sk_test_REDACTED"
+STRIPE_WEBHOOK_SECRET = "whsec_3aae6845dcbf3324269369e88c09fc549740bb32f80261d8f3f775e1ee0f5b18"
 
+STRIPE_PRICE_STARTER_MONTHLY = "price_1SewoWEFJJQJ5npukolJEu58"
+STRIPE_PRICE_STARTER_YEARLY = "price_1SewpCEFJJQJ5npuiK3609Dm"
 
 [[r2_buckets]]
 binding = "MY_R2_BUCKET"
 bucket_name = "promoai-images"          # Production bucket
 preview_bucket_name = "promoai-images-dev"   # Dev bucket created just now
+
+[[kv_namespaces]]
+binding = "LEADS_KV"
+id = "2d0fd609938d48fd9c5c9249199873a6"
+preview_id = "5c730130d2634380964ecd039fdd6ac9"
+

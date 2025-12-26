@@ -77,12 +77,82 @@ import { chatbotFileProcessHandler } from "./routes/chatbot/file/process";
 import { chatbotFileTextUploadHandler } from "./routes/chatbot/file/uploadText";
 import { chatbotFileUploadToGPTHandler } from "./routes/chatbot/file/uploadToGPT";
 import { chatbotFileAskGPTHandler } from "./routes/chatbot/file/askGPT";
-
-
  
-// ------------------------
-// ENV INTERFACE (FINALIZED)
-// ------------------------
+import { chatbotSitecrawlerListHandler } from "./routes/chatbot/sitecrawler/sitecrawlerList";
+import { chatbotSitecrawlerStartHandler } from "./routes/chatbot/sitecrawler/sitecrawlerStart";
+import { chatbotSitecrawlerStatusHandler } from "./routes/chatbot/sitecrawler/sitecrawlerStatus";
+import { chatbotSitecrawlerDeleteHandler } from "./routes/chatbot/sitecrawler/sitecrawlerDelete";
+import { chatbotSitecrawlerStopHandler } from "./routes/chatbot/sitecrawler/sitecrawlerStop";
+ import { chatbotSitecrawlerPagesHandler } from "./routes/chatbot/sitecrawler/sitecrawlerPages";
+ import { chatbotSitecrawlerClearHandler } from "./routes/chatbot/sitecrawler/sitecrawlerClear";
+ import { leadCapture } from "./routes/chatbot/leadCapture";
+ import { leadList } from "./routes/chatbot/leadList";
+ import { leadHistory } from "./routes/lead/leadHistory";
+ import { chatbotHistoryList } from "./routes/chatbot/historyList";
+import { chatbotHistorySession } from "./routes/chatbot/historySession";
+import {
+  whatsappWebhookVerify,
+  whatsappWebhookReceive
+} from "./routes/whatsappWebhook";
+import { devicesListHandler } from "./routes/devices/list";
+import { devicesCreateHandler } from "./routes/devices/create";
+import { deviceGetHandler } from "./routes/devices/get";
+import { deviceUpdateHandler } from "./routes/devices/update";
+import { deviceDeleteHandler } from "./routes/devices/delete";
+import { deviceRuntimeUpdateHandler } from "./routes/devices/runtime";
+import { contactsListHandler } from "./routes/contacts/list";
+import { contactsCreateHandler } from "./routes/contacts/create";
+import { contactsDeleteHandler } from "./routes/contacts/delete";
+import { contactsImport } from "./routes/contacts/contactsImport";
+import { templatesListHandler } from "./routes/watemplates/templatesList";
+import { templateCreateHandler } from "./routes/watemplates/templateCreate";
+import { broadcastCreateHandler } from "./routes/broadcast/create";
+import { broadcastListHandler } from "./routes/broadcast/list";
+import { broadcastScheduleHandler } from "./routes/broadcast/schedule";
+import { broadcastStartHandler } from "./routes/broadcast/start";
+import { broadcastPauseHandler } from "./routes/broadcast/pause";
+import { waTemplateGetHandler } from "./routes/watemplates/templateGet";
+import { waTemplateUpdateHandler } from "./routes/watemplates/templateUpdate";
+import { waTemplateDeleteHandler } from "./routes/watemplates/templateDelete";
+import { contactsUpdateHandler } from "./routes/contacts/update";
+import { broadcastGetHandler } from "./routes/broadcast/get";
+import { broadcastUpdateHandler } from "./routes/broadcast/update";
+import { broadcastDeleteHandler } from "./routes/broadcast/delete";
+import { subscriptionGetHandler } from "./routes/subscription/get";
+import { subscriptionActivateHandler } from "./routes/subscription/activate";
+import { subscriptionCheckoutHandler } from "./routes/subscription/subscriptionCheckout";
+import { stripeWebhookHandler } from "./routes/api/stripe/stripeWebhook";
+import { stripeCheckoutHandler } from "./routes/api/stripe/checkout";
+import { subscriptionInvoicesHandler } from "./routes/subscription/invoices";
+import { inboxListHandler } from "./routes/inbox/list";
+import { inboxGetHandler } from "./routes/inbox/get";
+import { inboxMessagesHandler } from "./routes/inbox/messages";
+import { inboxSendHandler } from "./routes/inbox/send";
+import { inboxUpdateHandler } from "./routes/inbox/update";
+import { chatWidgetAppearanceUpdateHandler } from "./routes/chat-widget/appearanceUpdate";
+import { chatWidgetAppearanceGetHandler } from "./routes/chat-widget/appearanceGet";
+import { chatWidgetAppearanceCreateHandler } from "./routes/chat-widget/appearanceCreate";
+import { chatPageCreateHandler } from "./routes/chat-page/create";
+import { chatPageGetHandler } from "./routes/chat-page/get";
+import { chatPageUpdateHandler } from "./routes/chat-page/update";
+import { apiKeyCreateHandler } from "./routes/api-keys/create";
+import { apiKeyListHandler } from "./routes/api-keys/list";
+import { apiKeyRevokeHandler } from "./routes/api-keys/revoke";
+// Webhooks – Event Types
+import { eventTypesListHandler } from "./routes/webhooks/event-types/list";
+import { eventTypesCreateHandler } from "./routes/webhooks/event-types/create";
+import { eventTypesUpdateHandler } from "./routes/webhooks/event-types/update";
+import { eventTypesDeleteHandler } from "./routes/webhooks/event-types/delete";
+
+import { webhookSubscriptionsUpdateHandler } from "./routes/webhooks/subscriptions/update";
+import { webhookSubscriptionsDeleteHandler } from "./routes/webhooks/subscriptions/delete"
+import { webhookSubscriptionsListHandler } from "./routes/webhooks/subscriptions/list";
+import { webhookSubscriptionsCreateHandler } from "./routes/webhooks/subscriptions/create";
+
+import { webhookEventsIngestHandler } from "./routes/webhooks/events/ingest";
+import { webhookEventsListHandler } from "./routes/webhooks/events/list";
+import { webhookEventsGetHandler } from "./routes/webhooks/events/get";
+
 export interface Env {
   KV: KVNamespace;
   MY_R2_BUCKET?: R2Bucket;
@@ -92,11 +162,8 @@ export interface Env {
   chatbotbusiness?: KVNamespace;
   chatbotstore?: KVNamespace;
 }
+ 
 
-
-// ------------------------
-// CORS
-// ------------------------
 const CORS_HEADERS: HeadersInit = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET,POST,OPTIONS,DELETE,PUT",
@@ -132,6 +199,13 @@ export default {
       if (path.startsWith("/r2/") && req.method === "GET") {
         return r2PublicGetHandler(req, env);
       }
+
+    if (path.startsWith("/contacts/update/") && req.method === "PUT") {
+      const parts = path.split("/").filter(Boolean);
+      const contactId = parts[parts.length - 1];
+      return withCors(await contactsUpdateHandler(req, env, contactId));
+    }
+
 
       // ------------------------
       // AUTH
@@ -208,6 +282,29 @@ if (path === "/resend" && req.method === "POST")
       if (path.startsWith("/chatbot/delete/") && req.method === "DELETE")
         return withCors(await deleteChatbot(req, env));
 
+
+
+if (path === "/watemplates" && req.method === "GET") {
+  return withCors(await templatesListHandler(req, env));
+}
+
+if (path === "/watemplates/create" && req.method === "POST") {
+  return withCors(await templateCreateHandler(req, env));
+}
+if (path.startsWith("/watemplates/") && req.method === "GET") {
+  const id = path.split("/").pop()!;
+  return withCors(await waTemplateGetHandler(req, env, id));
+}
+
+if (path.startsWith("/watemplates/update/") && req.method === "POST") {
+  const id = path.split("/").pop()!;
+  return withCors(await waTemplateUpdateHandler(req, env, id));
+}
+if (path.startsWith("/watemplates/delete/") && req.method === "DELETE") {
+  const id = path.split("/").pop()!;
+  return withCors(await waTemplateDeleteHandler(req, env, id));
+}
+
       // ------------------------
       // TEMPLATE MANAGEMENT
       // ------------------------
@@ -241,7 +338,6 @@ if (path === "/resend" && req.method === "POST")
       if (url.pathname === "/store/list" && req.method === "GET") {
        return withCors(await storeListHandler(req, env));
       }
-
 
       if (path.startsWith("/stores/name/") && req.method === "GET")
         return withCors(await storeGetByNameHandler(req, env));
@@ -366,9 +462,304 @@ if (req.method === "POST" && path.startsWith("/chatbot/files/askGPT/")) {
   return withCors(await chatbotFileAskGPTHandler(req, env, id));
 }
 
-      // ------------------------
-      // NOT FOUND
-      // ------------------------
+if (path.startsWith("/chatbot/sitecrawler/")) {
+  console.log("🟢 ===========================Sitecrawler router matched:", path);
+}
+
+if (path === "/chatbot/sitecrawler/create" && req.method === "POST") {
+  return withCors(await chatbotSitecrawlerClearHandler(req, env));
+}
+
+if (path.startsWith("/chatbot/sitecrawler/list/") && req.method === "GET") {
+  return withCors(await chatbotSitecrawlerListHandler(req, env));
+}
+
+if (path.startsWith("/chatbot/sitecrawler/start/") && req.method === "POST") {
+  return withCors(await chatbotSitecrawlerStartHandler(req, env));
+}
+
+if (path.startsWith("/chatbot/sitecrawler/status/") && req.method === "GET") {
+  return withCors(await chatbotSitecrawlerStatusHandler(req, env));
+}
+
+if (path.startsWith("/chatbot/sitecrawler/delete/") && req.method === "DELETE") {
+  return withCors(await chatbotSitecrawlerDeleteHandler(req, env));
+}
+
+if (path.startsWith("/chatbot/sitecrawler/stop/") && req.method === "POST") {
+  return withCors(await chatbotSitecrawlerStopHandler(req, env));
+}
+
+if (path.startsWith("/chatbot/sitecrawler/pages/") && req.method === "GET") {
+  console.log("✅ ROUTER HIT: PAGES");
+  return withCors(await chatbotSitecrawlerPagesHandler(req, env));
+}
+if (path.startsWith("/chatbot/sitecrawler/clear/") && req.method === "DELETE") {
+  const id = path.split("/").pop()!;
+  console.log("🧹 ROUTER HIT: CLEAR", id);
+  return withCors(await chatbotSitecrawlerClearHandler(req, env));
+}
+if (path === "/lead/capture" && req.method === "POST")
+  return withCors(await leadCapture(req, env));
+
+if (path === "/lead/list" && req.method === "GET")
+  return withCors(await leadList(req, env));
+
+if (path === "/lead/history" && req.method === "GET")
+  return withCors(await leadHistory(req, env));
+
+if (path.startsWith("/chatbot/history/list/") && req.method === "GET") {
+  const chatbotId = path.split("/").pop()!;
+  return withCors(await chatbotHistoryList(req, env, chatbotId));
+}
+
+if (path.startsWith("/chatbot/history/session/") && req.method === "GET") {
+  const parts = path.split("/");
+  const chatbotId = parts[parts.length - 2];
+  const sessionId = parts[parts.length - 1];
+  return withCors(await chatbotHistorySession(req, env, chatbotId, sessionId));
+}
+if (path === "/whatsapp/webhook" && req.method === "GET") {
+  return await whatsappWebhookVerify(req);
+}
+
+if (path === "/whatsapp/webhook" && req.method === "POST") {
+  return await whatsappWebhookReceive(req, env);
+}
+
+// ------------------------
+// WHATSAPP DEVICES
+// ------------------------
+if (path === "/devices" && req.method === "GET") {
+  return withCors(await devicesListHandler(req, env));
+}
+
+if (path === "/devices/create" && req.method === "POST") {
+  return withCors(await devicesCreateHandler(req, env));
+}
+
+if (path.startsWith("/devices/update/") && req.method === "POST") {
+  const sessionId = path.split("/").pop()!;
+  return withCors(await deviceUpdateHandler(req, env, sessionId));
+}
+
+if (path.startsWith("/devices/runtime/") && req.method === "POST") {
+  const sessionId = path.split("/").pop()!;
+  return withCors(await deviceRuntimeUpdateHandler(req, env, sessionId));
+}
+
+if (path.startsWith("/devices/delete/") && req.method === "DELETE") {
+  const sessionId = path.split("/").pop()!;
+  return withCors(await deviceDeleteHandler(req, env, sessionId));
+}
+
+if (path.startsWith("/devices/") && req.method === "GET") {
+  const sessionId = path.split("/").pop()!;
+  return withCors(await deviceGetHandler(req, env, sessionId));
+}
+if (path === "/contacts" && req.method === "GET") {
+  return withCors(await contactsListHandler(req, env));
+}
+
+if (path === "/contacts/create" && req.method === "POST") {
+  return withCors(await contactsCreateHandler(req, env));
+}
+
+if (path.startsWith("/contacts/delete/") && req.method === "DELETE") {
+  const contactId = path.split("/").pop()!;
+  return withCors(await contactsDeleteHandler(req, env, contactId));
+}
+if (path === "/contacts/import" && req.method === "POST") {
+  return withCors(await contactsImport(req, env));
+}
+
+if (path === "/broadcast/create" && req.method === "POST") {
+  return withCors(await broadcastCreateHandler(req, env));
+}
+
+if (path === "/broadcast/list" && req.method === "GET") {
+  return withCors(await broadcastListHandler(req, env));
+}
+
+if (path === "/broadcast/schedule" && req.method === "POST") {
+  return withCors(await broadcastScheduleHandler(req, env));
+}
+
+if (path === "/broadcast/start" && req.method === "POST") {
+  ctx.waitUntil(broadcastStartHandler(req, env));
+  return withCors(
+    new Response(JSON.stringify({ success: true }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    })
+  );
+}
+
+if (path === "/broadcast/pause" && req.method === "POST") {
+  return withCors(await broadcastPauseHandler(req, env));
+}
+if (path.startsWith("/broadcast/get/") && req.method === "GET") {
+  const id = path.split("/").pop()!;
+  return withCors(await broadcastGetHandler(req, env, id));
+}
+
+if (path.startsWith("/broadcast/update/") && req.method === "POST") {
+  const id = path.split("/").pop()!;
+  return withCors(await broadcastUpdateHandler(req, env, id));
+
+}
+if (path === "/broadcast/delete" && req.method === "POST") {
+  return withCors(await broadcastDeleteHandler(req, env)); 
+}
+if (path === "/subscription/get" && req.method === "GET") {
+  return withCors(await subscriptionGetHandler(req, env));  
+}
+if (path === "/subscription/activate" && req.method === "POST") {
+  return withCors(await subscriptionActivateHandler(req, env));
+}
+
+if (path === "/subscription/checkout" && req.method === "POST") {
+  return withCors(await subscriptionCheckoutHandler(req, env));
+}
+if (path === "/stripe/webhook" && req.method === "POST") {
+  return withCors(await stripeWebhookHandler(req, env));
+}
+if (path === "/subscription/invoices" && req.method === "GET") {
+  return withCors(await subscriptionInvoicesHandler(req, env));
+}
+
+// ------------------------
+// INBOX
+// ------------------------
+if (path === "/inbox/list" && req.method === "GET") {
+  return withCors(await inboxListHandler(req, env));
+}
+
+if (path === "/inbox/get" && req.method === "GET") {
+  return withCors(await inboxGetHandler(req, env));
+}
+
+if (path === "/inbox/messages" && req.method === "GET") {
+  return withCors(await inboxMessagesHandler(req, env));
+}
+
+if (path === "/inbox/send" && req.method === "POST") {
+  return withCors(await inboxSendHandler(req, env));
+}
+
+if (path === "/inbox/update" && req.method === "POST") {
+  return withCors(await inboxUpdateHandler(req, env));
+}
+
+if (path.startsWith("/chat-widget/appearance/update/") && req.method === "PUT") {
+  const widgetId = path.split("/").pop()!;
+  return withCors(await chatWidgetAppearanceUpdateHandler(req, env, widgetId));
+}
+
+// 4️⃣ GET  ✅
+if (path.startsWith("/chat-widget/appearance/get/") && req.method === "GET") {
+  const widgetId = path.split("/").pop()!;
+  return withCors(await chatWidgetAppearanceGetHandler(req, env, widgetId));
+}
+
+if (path === "/chat-widget/appearance/create" && req.method === "POST") {
+  return withCors(await chatWidgetAppearanceCreateHandler(req, env));
+}
+
+if (path === "/chat-page/create" && req.method === "POST") {
+  return withCors(await chatPageCreateHandler(req, env));
+}
+
+// GET
+if (path.startsWith("/chat-page/get/") && req.method === "GET") {
+  const widgetId = path.split("/").pop() || "";
+  return withCors(await chatPageGetHandler(req, env, widgetId));
+}
+
+// UPDATE
+if (path.startsWith("/chat-page/update/") && req.method === "PUT") {
+  const widgetId = path.split("/").pop() || "";
+  return withCors(await chatPageUpdateHandler(req, env, widgetId));
+}
+
+if (path === "/api-keys/create" && req.method === "POST")
+  return withCors(await apiKeyCreateHandler(req, env));
+
+if (path === "/api-keys/list" && req.method === "GET")
+  return withCors(await apiKeyListHandler(req, env));
+
+if (path.startsWith("/api-keys/revoke/") && req.method === "POST") {
+  const hash = path.split("/").pop()!;
+  return withCors(await apiKeyRevokeHandler(req, env, hash));
+}
+
+if (path === "/events" && req.method === "POST")
+  return withCors(await eventIngestHandler(req, env));
+
+if (path === "/webhooks/event-types/list" && req.method === "GET")
+  return withCors(await eventTypesListHandler(req, env));
+
+if (path === "/webhooks/event-types/create" && req.method === "POST")
+  return withCors(await eventTypesCreateHandler(req, env));
+
+if (path.startsWith("/webhooks/event-types/update/") && req.method === "PUT") {
+  const id = path.split("/").pop()!;
+  return withCors(await eventTypesUpdateHandler(req, env, id));
+}
+
+if (path.startsWith("/webhooks/event-types/delete/") && req.method === "DELETE") {
+  const id = path.split("/").pop()!;
+  return withCors(await eventTypesDeleteHandler(req, env, id));
+}
+
+if (path === "/webhooks/event-types/list" && req.method === "GET")
+  return withCors(await eventTypesListHandler(req, env));
+
+if (path === "/webhooks/event-types/create" && req.method === "POST")
+  return withCors(await eventTypesCreateHandler(req, env));
+
+if (path.startsWith("/webhooks/event-types/update/") && req.method === "PUT") {
+  const id = path.split("/").pop()!;
+  return withCors(await eventTypesUpdateHandler(req, env, id));
+}
+
+if (path.startsWith("/webhooks/event-types/delete/") && req.method === "DELETE") {
+  const id = path.split("/").pop()!;
+  return withCors(await eventTypesDeleteHandler(req, env, id));
+}
+
+if (path === "/webhooks/subscriptions/list" && req.method === "GET")
+  return withCors(await webhookSubscriptionsListHandler(req, env));
+
+if (path === "/webhooks/subscriptions/create" && req.method === "POST")
+  return withCors(await webhookSubscriptionsCreateHandler(req, env));
+
+if (path.startsWith("/webhooks/subscriptions/update/") && req.method === "PUT") {
+  const id = path.split("/").pop()!;
+  return withCors(await webhookSubscriptionsUpdateHandler(req, env, id));
+}
+if (path.startsWith("/webhooks/subscriptions/delete/") && req.method === "DELETE") {
+  const id = path.split("/").pop()!;
+  return withCors(await webhookSubscriptionsDeleteHandler(req, env, id));
+}
+
+if (path === "/webhooks/events/list" && req.method === "GET") {
+  return withCors(await webhookEventsListHandler(req, env));
+}
+
+if (path.startsWith("/webhooks/events/get/") && req.method === "GET") {
+  const id = path.split("/").pop()!;
+  return withCors(await webhookEventsGetHandler(req, env, id));
+}
+
+if (path === "/webhooks/events/list" && req.method === "GET") {
+  return withCors(await webhookEventsListHandler(req, env));
+}
+
+if (path.startsWith("/webhooks/events/get/") && req.method === "GET") {
+  const id = path.split("/").pop()!;
+  return withCors(await webhookEventsGetHandler(req, env, id));
+}
       return withCors(
         new Response(JSON.stringify({ error: "Not Found" }), { 
           status: 404, 
