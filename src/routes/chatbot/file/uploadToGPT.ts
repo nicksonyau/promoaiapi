@@ -43,8 +43,7 @@ export async function chatbotFileUploadToGPTHandler(req: Request, env: Env, id: 
   // -----------------------------------------------------
   // HARD-CODED OPENAI KEY (TEST ONLY)
   // -----------------------------------------------------
-  const OPENAI_API_KEY = "sk_REDACTED";
-
+  const OPENAI_API_KEY = "";
   if (!OPENAI_API_KEY || !OPENAI_API_KEY.startsWith("sk-")) {
     console.error("❌ INVALID OPENAI KEY");
     return jsonResponse({ error: "Invalid OpenAI API key" }, 500);

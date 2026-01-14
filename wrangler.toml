@@ -34,13 +34,13 @@ id = "e29ffb3d348c439cae7475db210b8422" # <-- from wrangler kv list
 preview_id = "04b7f1d29d0e444ab480225406e6df51" # <-- preview
 
 [vars]
-RESEND_API_KEY = "re_V6chGrq3_A5hE8nvaXc48cCKke8e13sBN"
+RESEND_API_KEY = ""
 FRONTEND_URL = "http://localhost:3000"
 WORKER_URL = "http://127.0.0.1:8787"
  
 APP_BASE_URL = "http://localhost:3000"
-STRIPE_SECRET_KEY = "sk_test_REDACTED"
-STRIPE_WEBHOOK_SECRET = "whsec_3aae6845dcbf3324269369e88c09fc549740bb32f80261d8f3f775e1ee0f5b18"
+STRIPE_SECRET_KEY = ""
+STRIPE_WEBHOOK_SECRET = ""
 
 STRIPE_PRICE_STARTER_MONTHLY = "price_1SewoWEFJJQJ5npukolJEu58"
 STRIPE_PRICE_STARTER_YEARLY = "price_1SewpCEFJJQJ5npuiK3609Dm"
