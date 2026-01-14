@@ -2,85 +2,81 @@ import type { Env } from "../../index";
 import { jsonResponse } from "../_lib/utils";
 import { requireCompany } from "../../_lib/auth";
 
+function readCompanyIdFromQuery(req: Request): string {
+  try {
+    const u = new URL(req.url);
+    return (u.searchParams.get("companyId") || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+function normalizeId(id: any): string {
+  return typeof id === "string" ? id.trim() : "";
+}
+
 export async function chatPageGetHandler(
   req: Request,
   env: Env,
-  widgetId: string
+  id: string // route param (chatPageId)
 ) {
   const traceId = crypto.randomUUID();
 
   try {
+    const chatPageId = normalizeId(id);
+
     console.log(`[chat-page/get] start`, {
       traceId,
       method: req.method,
-      widgetId,
+      chatPageId,
     });
 
-    // -----------------------------
-    // Method guard
-    // -----------------------------
     if (req.method !== "GET") {
       console.warn(`[chat-page/get] method not allowed`, {
         traceId,
         method: req.method,
       });
+      return jsonResponse({ success: false, error: "Method not allowed" }, 405);
+    }
 
-      return jsonResponse(
-        { success: false, error: "Method not allowed" },
-        405
-      );
+    if (!chatPageId) {
+      console.warn(`[chat-page/get] missing chatPageId`, { traceId });
+      return jsonResponse({ success: false, error: "chatPageId required" }, 400);
     }
 
     // -----------------------------
-    // Auth
+    // Auth (dashboard) OR public fallback
     // -----------------------------
     const session = await requireCompany(env, req);
+    const companyIdFromSession = (session?.companyId || "").trim();
+    const companyIdFromQuery = readCompanyIdFromQuery(req);
+
+    const companyId = companyIdFromSession || companyIdFromQuery;
 
     console.log(`[chat-page/get] auth result`, {
       traceId,
       hasSession: !!session,
-      companyId: session?.companyId ?? null,
+      companyIdFromSession: companyIdFromSession || null,
+      companyIdFromQuery: companyIdFromQuery || null,
+      resolvedCompanyId: companyId || null,
     });
 
-    if (!session?.companyId) {
-      console.warn(`[chat-page/get] unauthorized`, { traceId });
-
-      return jsonResponse(
-        { success: false, error: "Unauthorized" },
-        401
-      );
+    if (!companyId) {
+      console.warn(`[chat-page/get] unauthorized (no session + no companyId query)`, { traceId });
+      return jsonResponse({ success: false, error: "Unauthorized" }, 401);
     }
 
     // -----------------------------
-    // Params
+    // KV lookup (MUST MATCH create/update)
     // -----------------------------
-    if (!widgetId) {
-      console.warn(`[chat-page/get] missing widgetId`, { traceId });
+    const key = `chat_page:${companyId}:${chatPageId}`;
 
-      return jsonResponse(
-        { success: false, error: "widgetId required" },
-        400
-      );
-    }
-
-    // -----------------------------
-    // KV lookup
-    // -----------------------------
-    const key = `chat_page:${session.companyId}:${widgetId}`;
-
-    console.log(`[chat-page/get] kv lookup`, {
-      traceId,
-      key,
-    });
+    console.log(`[chat-page/get] kv lookup`, { traceId, key });
 
     const data = await env.KV.get(key, "json");
 
     if (!data) {
-      console.log(`[chat-page/get] record not found`, {
-        traceId,
-        key,
-      });
-
+      console.log(`[chat-page/get] record not found`, { traceId, key });
       return jsonResponse({
         success: true,
         exists: false,
@@ -106,9 +102,6 @@ export async function chatPageGetHandler(
       stack: e?.stack,
     });
 
-    return jsonResponse(
-      { success: false, error: e?.message || "Server error" },
-      500
-    );
+    return jsonResponse({ success: false, error: e?.message || "Server error" }, 500);
   }
 }

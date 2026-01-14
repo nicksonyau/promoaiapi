@@ -4,6 +4,16 @@ import type { Env } from "../../index";
 
 type Interval = "monthly" | "yearly";
 
+type BillingEvent = {
+  id: string;
+  ts: string;
+  type: "activate" | "checkout_created" | "plan_changed" | string;
+  plan?: string;
+  interval?: string;
+  refId?: string | null;
+  note?: string;
+};
+
 function normalizePlan(plan: any) {
   return String(plan || "").trim().toLowerCase();
 }
@@ -14,18 +24,32 @@ function normalizeInterval(interval: any): Interval {
 }
 
 function requireEnv(env: any, key: string) {
-  const v = env[key];
+  const v = env?.[key];
   if (!v) throw new Error(`Missing env.${key}`);
   return String(v);
 }
 
 function priceIdFor(env: any, plan: string, interval: Interval) {
-  // ✅ DO NOT GUESS your Stripe price IDs. Put them in env.
-  // Example:
-  // STRIPE_PRICE_STARTER_MONTHLY=price_...
-  // STRIPE_PRICE_STARTER_YEARLY=price_...
   const k = `STRIPE_PRICE_${plan.toUpperCase()}_${interval.toUpperCase()}`;
   return requireEnv(env, k);
+}
+
+async function appendBillingEvent(
+  env: Env,
+  companyId: string,
+  event: Omit<BillingEvent, "id" | "ts">
+) {
+  const key = `billinglog:${companyId}`;
+  const current = (await env.KV.get(key, "json")) as BillingEvent[] | null;
+  const list = Array.isArray(current) ? current : [];
+
+  list.unshift({
+    id: crypto.randomUUID(),
+    ts: new Date().toISOString(),
+    ...event,
+  });
+
+  await env.KV.put(key, JSON.stringify(list.slice(0, 50)));
 }
 
 export async function subscriptionCheckoutHandler(req: Request, env: Env) {
@@ -56,34 +80,42 @@ export async function subscriptionCheckoutHandler(req: Request, env: Env) {
       return jsonResponse({ success: false, error: "Plan is required" }, 400, req);
     }
 
-    // Optional: prevent checkout for free here (free handled by /subscription/activate)
     if (plan === "free") {
-      return jsonResponse({ success: false, error: "Use /subscription/activate for free" }, 400, req);
+      return jsonResponse(
+        { success: false, error: "Use /subscription/activate for free" },
+        400,
+        req
+      );
     }
 
     const stripeKey = requireEnv(env, "STRIPE_SECRET_KEY");
     const appBaseUrl = requireEnv(env, "APP_BASE_URL"); // e.g. http://localhost:3000
     const priceId = priceIdFor(env, plan, interval);
 
-    
+    const companyId = String(session.companyId);
+
     const successUrl = `${appBaseUrl}/en/dashboard/settings/billing?checkout=success`;
-    const cancelUrl = `${appBaseUrl}/en/dashboard/settings/billing?checkout=cancel`;
+    const cancelUrl = `${appBaseUrl}/en/pricing?checkout=cancel`;
 
-
-    // Create Checkout Session (Stripe API)
     const form = new URLSearchParams();
     form.set("mode", "subscription");
     form.set("success_url", successUrl);
     form.set("cancel_url", cancelUrl);
 
-    form.set("client_reference_id", session.companyId);
+    // ✅ easiest mapping in Stripe Dashboard
+    form.set("client_reference_id", companyId);
 
     // line item
     form.set("line_items[0][price]", priceId);
     form.set("line_items[0][quantity]", "1");
 
-    // metadata (used by webhook to map to plan/interval without guessing)
-    form.set("metadata[companyId]", session.companyId);
+    // ✅ put mapping on SUBSCRIPTION metadata (not only session metadata)
+    form.set("subscription_data[metadata][companyId]", companyId);
+    form.set("subscription_data[metadata][plan]", plan);
+    form.set("subscription_data[metadata][interval]", interval);
+
+    // session metadata (optional)
+    form.set("metadata[companyId]", companyId);
     form.set("metadata[plan]", plan);
     form.set("metadata[interval]", interval);
 
@@ -115,6 +147,14 @@ export async function subscriptionCheckoutHandler(req: Request, env: Env) {
       const msg = data?.error?.message || "Stripe session creation failed";
       return jsonResponse({ success: false, error: msg }, 400, req);
     }
+
+    await appendBillingEvent(env, companyId, {
+      type: "checkout_created",
+      plan,
+      interval,
+      refId: data?.id || null,
+      note: "Stripe checkout session created",
+    });
 
     return jsonResponse({ success: true, url: data.url }, 200, req);
   } catch (e: any) {

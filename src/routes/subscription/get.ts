@@ -47,6 +47,10 @@ export async function subscriptionGetHandler(req: Request, env: Env) {
       endDate: existing.endDate,
     });
 
+console.log(` =====================start delete`);
+//  await env.KV.delete(`subscription:${session.companyId}`);
+  //await env.KV.delete(`billinglog:${session.companyId}`);
+
     return jsonResponse(
       {
         success: true,

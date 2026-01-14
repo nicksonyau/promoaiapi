@@ -132,9 +132,13 @@ import { inboxUpdateHandler } from "./routes/inbox/update";
 import { chatWidgetAppearanceUpdateHandler } from "./routes/chat-widget/appearanceUpdate";
 import { chatWidgetAppearanceGetHandler } from "./routes/chat-widget/appearanceGet";
 import { chatWidgetAppearanceCreateHandler } from "./routes/chat-widget/appearanceCreate";
+
 import { chatPageCreateHandler } from "./routes/chat-page/create";
 import { chatPageGetHandler } from "./routes/chat-page/get";
 import { chatPageUpdateHandler } from "./routes/chat-page/update";
+import { chatPageListHandler } from "./routes/chat-page/list";
+import { chatpageDeleteHandler } from "./routes/chat-page/delete";
+
 import { apiKeyCreateHandler } from "./routes/api-keys/create";
 import { apiKeyListHandler } from "./routes/api-keys/list";
 import { apiKeyRevokeHandler } from "./routes/api-keys/revoke";
@@ -152,6 +156,15 @@ import { webhookSubscriptionsCreateHandler } from "./routes/webhooks/subscriptio
 import { webhookEventsIngestHandler } from "./routes/webhooks/events/ingest";
 import { webhookEventsListHandler } from "./routes/webhooks/events/list";
 import { webhookEventsGetHandler } from "./routes/webhooks/events/get";
+
+import { subscriptionBillingListHandler } from "./routes/subscription/billing-list";
+import { stripeWebhookHandler } from "./routes/subscription/stripe-webhook";
+import { subscriptionUsageLogHandler } from "./routes/subscription/usage-log";
+import { subscriptionUsageGetHandler } from "./routes/subscription/usage-get";
+import { chatWidgetListHandler } from "./routes/chat-widget/list";
+
+import { chatWidgetDeleteHandler } from "./routes/chat-widget/delete";
+
 
 export interface Env {
   KV: KVNamespace;
@@ -282,28 +295,26 @@ if (path === "/resend" && req.method === "POST")
       if (path.startsWith("/chatbot/delete/") && req.method === "DELETE")
         return withCors(await deleteChatbot(req, env));
 
+    if (path === "/watemplates" && req.method === "GET") {
+      return withCors(await templatesListHandler(req, env));
+    }
 
+    if (path === "/watemplates/create" && req.method === "POST") {
+      return withCors(await templateCreateHandler(req, env));
+    }
+    if (path.startsWith("/watemplates/") && req.method === "GET") {
+      const id = path.split("/").pop()!;
+      return withCors(await waTemplateGetHandler(req, env, id));
+    }
 
-if (path === "/watemplates" && req.method === "GET") {
-  return withCors(await templatesListHandler(req, env));
-}
-
-if (path === "/watemplates/create" && req.method === "POST") {
-  return withCors(await templateCreateHandler(req, env));
-}
-if (path.startsWith("/watemplates/") && req.method === "GET") {
-  const id = path.split("/").pop()!;
-  return withCors(await waTemplateGetHandler(req, env, id));
-}
-
-if (path.startsWith("/watemplates/update/") && req.method === "POST") {
-  const id = path.split("/").pop()!;
-  return withCors(await waTemplateUpdateHandler(req, env, id));
-}
-if (path.startsWith("/watemplates/delete/") && req.method === "DELETE") {
-  const id = path.split("/").pop()!;
-  return withCors(await waTemplateDeleteHandler(req, env, id));
-}
+    if (path.startsWith("/watemplates/update/") && req.method === "POST") {
+      const id = path.split("/").pop()!;
+      return withCors(await waTemplateUpdateHandler(req, env, id));
+    }
+    if (path.startsWith("/watemplates/delete/") && req.method === "DELETE") {
+      const id = path.split("/").pop()!;
+      return withCors(await waTemplateDeleteHandler(req, env, id));
+    }
 
       // ------------------------
       // TEMPLATE MANAGEMENT
@@ -621,12 +632,18 @@ if (path === "/subscription/activate" && req.method === "POST") {
 if (path === "/subscription/checkout" && req.method === "POST") {
   return withCors(await subscriptionCheckoutHandler(req, env));
 }
-if (path === "/stripe/webhook" && req.method === "POST") {
-  return withCors(await stripeWebhookHandler(req, env));
-}
+
+//if (path === "/stripe/webhook" && req.method === "POST") {
+  //return withCors(await stripeWebhookHandler(req, env));
+//}
 if (path === "/subscription/invoices" && req.method === "GET") {
   return withCors(await subscriptionInvoicesHandler(req, env));
 }
+
+if (path === "/subscription/billing/list" && req.method === "GET") {
+  return withCors(await subscriptionBillingListHandler(req, env));
+}
+
 
 // ------------------------
 // INBOX
@@ -666,6 +683,8 @@ if (path === "/chat-widget/appearance/create" && req.method === "POST") {
   return withCors(await chatWidgetAppearanceCreateHandler(req, env));
 }
 
+
+//chat-page
 if (path === "/chat-page/create" && req.method === "POST") {
   return withCors(await chatPageCreateHandler(req, env));
 }
@@ -682,6 +701,16 @@ if (path.startsWith("/chat-page/update/") && req.method === "PUT") {
   return withCors(await chatPageUpdateHandler(req, env, widgetId));
 }
 
+// ------------------------
+if (path === "/chatpage/list" && req.method === "GET") {
+  return withCors(await chatPageListHandler(req, env));
+}
+
+if (path.startsWith("/chatpage/delete/") && req.method === "DELETE") {
+  const id = path.split("/").pop()!;
+  return withCors(await chatpageDeleteHandler(req, env, id));
+}
+
 if (path === "/api-keys/create" && req.method === "POST")
   return withCors(await apiKeyCreateHandler(req, env));
 
@@ -693,8 +722,8 @@ if (path.startsWith("/api-keys/revoke/") && req.method === "POST") {
   return withCors(await apiKeyRevokeHandler(req, env, hash));
 }
 
-if (path === "/events" && req.method === "POST")
-  return withCors(await eventIngestHandler(req, env));
+//if (path === "/events" && req.method === "POST")
+  //return withCors(await eventIngestHandler(req, env));
 
 if (path === "/webhooks/event-types/list" && req.method === "GET")
   return withCors(await eventTypesListHandler(req, env));
@@ -760,6 +789,25 @@ if (path.startsWith("/webhooks/events/get/") && req.method === "GET") {
   const id = path.split("/").pop()!;
   return withCors(await webhookEventsGetHandler(req, env, id));
 }
+if (path === "/subscription/stripe-webhook" && req.method === "POST") {
+  return await stripeWebhookHandler(req, env);
+}
+
+if (path === "/subscription/usage/log" && req.method === "POST") {
+  return withCors(await subscriptionUsageLogHandler(req, env));
+}
+
+if (path === "/subscription/usage/get" && req.method === "GET") {
+  return withCors(await subscriptionUsageGetHandler(req, env));
+}
+if (path === "/chat-widget/list" && req.method === "GET") {
+  return withCors(await chatWidgetListHandler(req, env));
+}
+// DELETE /chat-widget/delete?widgetId=...
+if (path === "/chat-widget/delete" && req.method === "DELETE") {
+  return withCors(await chatWidgetDeleteHandler(req, env));
+}
+
       return withCors(
         new Response(JSON.stringify({ error: "Not Found" }), { 
           status: 404, 

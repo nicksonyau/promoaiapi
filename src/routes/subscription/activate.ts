@@ -25,6 +25,34 @@ const PLAN_DEFINITION: Record<string, any> = {
   },
 };
 
+type BillingEvent = {
+  id: string;
+  ts: string;
+  type: "activate" | "checkout_created" | "plan_changed" | string;
+  plan?: string;
+  interval?: string;
+  refId?: string | null;
+  note?: string;
+};
+
+async function appendBillingEvent(
+  env: Env,
+  companyId: string,
+  event: Omit<BillingEvent, "id" | "ts">
+) {
+  const key = `billinglog:${companyId}`;
+  const current = (await env.KV.get(key, "json")) as BillingEvent[] | null;
+  const list = Array.isArray(current) ? current : [];
+
+  list.unshift({
+    id: crypto.randomUUID(),
+    ts: new Date().toISOString(),
+    ...event,
+  });
+
+  await env.KV.put(key, JSON.stringify(list.slice(0, 50))); // keep last 50
+}
+
 export async function subscriptionActivateHandler(req: Request, env: Env) {
   const traceId = crypto.randomUUID();
 
@@ -52,26 +80,18 @@ export async function subscriptionActivateHandler(req: Request, env: Env) {
     const body = await req.json().catch(() => null);
     if (!body?.plan) {
       console.warn(`[subscription/activate] missing plan trace=${traceId}`);
-      return jsonResponse(
-        { success: false, error: "Plan is required" },
-        400
-      );
+      return jsonResponse({ success: false, error: "Plan is required" }, 400);
     }
 
     const plan = String(body.plan).toLowerCase();
     const planDef = PLAN_DEFINITION[plan];
 
     if (!planDef) {
-      console.warn(`[subscription/activate] invalid plan trace=${traceId}`, {
-        plan,
-      });
-      return jsonResponse(
-        { success: false, error: "Invalid plan" },
-        400
-      );
+      console.warn(`[subscription/activate] invalid plan trace=${traceId}`, { plan });
+      return jsonResponse({ success: false, error: "Invalid plan" }, 400);
     }
 
-    const companyId = session.companyId;
+    const companyId = String(session.companyId);
     const key = `subscription:${companyId}`;
 
     // 🔍 CHECK EXISTING SUBSCRIPTION
@@ -80,34 +100,21 @@ export async function subscriptionActivateHandler(req: Request, env: Env) {
     if (existing) {
       // ✅ Free → Free is idempotent
       if (existing.plan === "free" && plan === "free") {
-        console.log(
-          `[subscription/activate] free already active trace=${traceId}`,
-          { companyId }
-        );
+        console.log(`[subscription/activate] free already active trace=${traceId}`, { companyId });
 
         return jsonResponse(
-          {
-            success: true,
-            subscription: existing,
-            alreadyActive: true,
-          },
+          { success: true, subscription: existing, alreadyActive: true },
           200
         );
       }
 
       // 🚫 Any other case is a conflict
-      console.warn(
-        `[subscription/activate] conflict trace=${traceId}`,
-        {
-          existingPlan: existing.plan,
-          requestedPlan: plan,
-        }
-      );
+      console.warn(`[subscription/activate] conflict trace=${traceId}`, {
+        existingPlan: existing.plan,
+        requestedPlan: plan,
+      });
 
-      return jsonResponse(
-        { success: false, error: "Subscription already exists" },
-        409
-      );
+     // return jsonResponse({ success: false, error: "Subscription already exists" }, 409);
     }
 
     // 🧮 DATES
@@ -139,24 +146,19 @@ export async function subscriptionActivateHandler(req: Request, env: Env) {
     // 💾 STORE
     await env.KV.put(key, JSON.stringify(subscription));
 
-    console.log(
-      `[subscription/activate] activated trace=${traceId}`,
-      subscription
-    );
+    // 🧾 BILLING HISTORY
+    await appendBillingEvent(env, companyId, {
+      type: "activate",
+      plan,
+      interval: planDef.interval,
+      note: "Manual activation",
+    });
 
-    return jsonResponse(
-      { success: true, subscription },
-      200
-    );
+    console.log(`[subscription/activate] activated trace=${traceId}`, subscription);
+
+    return jsonResponse({ success: true, subscription }, 200);
   } catch (e: any) {
-    console.error(
-      `[subscription/activate] error trace=${traceId}`,
-      e
-    );
-
-    return jsonResponse(
-      { success: false, error: e?.message || "Internal error" },
-      500
-    );
+    console.error(`[subscription/activate] error trace=${traceId}`, e);
+    return jsonResponse({ success: false, error: e?.message || "Internal error" }, 500);
   }
 }
