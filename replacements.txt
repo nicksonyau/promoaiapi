@@ -1,0 +1,4 @@
+regex:sk_test_[0-9a-zA-Z]+==>sk_test_REDACTED
+regex:sk_live_[0-9a-zA-Z]+==>sk_live_REDACTED
+regex:sk-[0-9a-zA-Z]{20,}==>sk_REDACTED
+regex:OPENAI_API_KEY\s*=\s*["'][^"']+["']==>OPENAI_API_KEY="REDACTED"

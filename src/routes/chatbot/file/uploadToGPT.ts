@@ -43,11 +43,24 @@ export async function chatbotFileUploadToGPTHandler(req: Request, env: Env, id: 
   // -----------------------------------------------------
   // HARD-CODED OPENAI KEY (TEST ONLY)
   // -----------------------------------------------------
-  const OPENAI_API_KEY = "";
-  if (!OPENAI_API_KEY || !OPENAI_API_KEY.startsWith("sk-")) {
-    console.error("❌ INVALID OPENAI KEY");
-    return jsonResponse({ error: "Invalid OpenAI API key" }, 500);
-  }
+ // -----------------------------------------------------
+// OPENAI KEY (from Worker secret)
+// -----------------------------------------------------
+const OPENAI_API_KEY = (env as any)?.OPENAI_API_KEY || "";
+
+if (!OPENAI_API_KEY) {
+  console.error("❌ OPENAI_API_KEY missing");
+  return jsonResponse({ error: "Missing OpenAI API key" }, 500);
+}
+
+// Optional format check (keep if you like)
+if (!OPENAI_API_KEY.startsWith("sk-")) {
+  console.error("❌ INVALID OPENAI KEY FORMAT");
+  return jsonResponse({ error: "Invalid OpenAI API key" }, 500);
+}
+
+// ❌ never log keys (even partial)
+console.log("🔑 OpenAI key loaded: YES");
 
   console.log("🔑 OpenAI key loaded:", OPENAI_API_KEY.slice(0, 8) + "...");
 
